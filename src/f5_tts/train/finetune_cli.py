@@ -32,6 +32,7 @@ def parse_args():
     )
     parser.add_argument("--dataset_name", type=str, default="Emilia_ZH_EN", help="Name of the dataset to use")
     parser.add_argument("--learning_rate", type=float, default=1e-5, help="Learning rate for training")
+    parser.add_argument("--num_workers", type=int, default=0, help="Number of workers for data loading")
     parser.add_argument("--batch_size_per_gpu", type=int, default=3200, help="Batch size per GPU")
     parser.add_argument(
         "--batch_size_type", type=str, default="frame", choices=["frame", "sample"], help="Batch size type"
@@ -206,6 +207,7 @@ def main():
 
     trainer.train(
         train_dataset,
+        num_workers=args.num_workers,
         resumable_with_seed=666,  # seed for shuffling dataset
     )
 
