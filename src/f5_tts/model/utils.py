@@ -120,7 +120,18 @@ def get_tokenizer(dataset_name, tokenizer: str = "pinyin"):
                 - if use "byte", set to 256 (unicode byte range)
     """
     if tokenizer in ["pinyin", "char"]:
-        tokenizer_path = os.path.join(files("f5_tts").joinpath("../../data"), f"{dataset_name}_{tokenizer}/vocab.txt")
+        if os.path.isfile(dataset_name):
+            tokenizer_path = dataset_name
+        else:
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+            data_root = os.path.join(project_root, "data")
+            candidate_paths = [
+                os.path.join(data_root, dataset_name, "vocab.txt"),
+                os.path.join(data_root, f"{dataset_name}_{tokenizer}", "vocab.txt"),
+                os.path.join(data_root, dataset_name.replace(f"_{tokenizer}", ""), "vocab.txt"),
+            ]
+            tokenizer_path = next((path for path in candidate_paths if os.path.exists(path)), candidate_paths[0])
+
         with open(tokenizer_path, "r", encoding="utf-8") as f:
             vocab_char_map = {}
             for i, char in enumerate(f):

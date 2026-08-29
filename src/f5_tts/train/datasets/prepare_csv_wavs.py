@@ -2,13 +2,13 @@
 Usage:
     python prepare_csv_wavs.py /path/to/metadata.csv /output/dataset/path [--pretrain] [--workers N]
 
-CSV format (header required, "|" delimiter):
+CSV format (header required, "|" delimiter; comma-separated rows are also accepted):
     audio_file|text
     /path/to/wavs/audio_0001.wav|Yo! Hello? Hello?
     /path/to/wavs/audio_0002.wav|Hi, how are you doing today? I want to go shopping and buy me some lemons.
 
 Notes:
-    - audio_file must be an absolute path.
+    - Relative audio_file paths are resolved relative to the metadata file.
 """
 
 import concurrent.futures
@@ -224,9 +224,12 @@ def read_audio_text_pairs(csv_file_path):
             text = row[1].strip()
             if not audio_file:
                 continue
-            audio_path = Path(audio_file).expanduser()
-            if not audio_path.is_absolute():
-                raise ValueError(f"audio_file must be an absolute path (row {row_idx}): {audio_file}")
+            try:
+                audio_path = Path(audio_file).expanduser().resolve(strict=True)
+            except FileNotFoundError:
+                raise ValueError(
+                    f"audio_file does not exist (row {row_idx}): {audio_file}"
+                )
             audio_text_pairs.append((audio_path.as_posix(), text))
 
     return audio_text_pairs
@@ -276,7 +279,7 @@ def get_args():
     parser.add_argument(
         "inp_dir",
         type=str,
-        help="Input CSV with header 'audio_file|text' and absolute wav paths.",
+        help="Input CSV with header 'audio_file|text' and absolute or metadata-relative wav paths.",
     )
     parser.add_argument("out_dir", type=str, help="Output directory to save the prepared data.")
     parser.add_argument("--pretrain", action="store_true", help="Enable for new pretrain, otherwise is a fine-tune")

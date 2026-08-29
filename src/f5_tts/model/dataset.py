@@ -1,5 +1,5 @@
 import json
-from importlib.resources import files
+import os
 
 import torch
 import torch.nn.functional as F
@@ -260,7 +260,24 @@ def load_dataset(
     print("Loading dataset ...")
 
     if dataset_type == "CustomDataset":
-        rel_data_path = str(files("f5_tts").joinpath(f"../../data/{dataset_name}_{tokenizer}"))
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+        data_root = os.path.join(project_root, "data")
+
+        candidate_paths = []
+        if os.path.isdir(dataset_name):
+            candidate_paths.append(os.path.abspath(dataset_name))
+
+        normalized_name = dataset_name.replace("_pinyin", "").replace("_char", "")
+        candidate_paths.extend(
+            [
+                os.path.join(data_root, dataset_name),
+                os.path.join(data_root, f"{dataset_name}_{tokenizer}"),
+                os.path.join(data_root, normalized_name),
+                os.path.join(data_root, f"{normalized_name}_{tokenizer}"),
+            ]
+        )
+        rel_data_path = next((path for path in candidate_paths if os.path.isdir(path)), candidate_paths[0])
+
         if audio_type == "raw":
             try:
                 train_dataset = load_from_disk(f"{rel_data_path}/raw")
@@ -299,9 +316,8 @@ def load_dataset(
             "Should manually modify the path of huggingface dataset to your need.\n"
             + "May also the corresponding script cuz different dataset may have different format."
         )
-        pre, post = dataset_name.split("_")
         train_dataset = HFDataset(
-            load_dataset(f"{pre}/{pre}", split=f"train.{post}", cache_dir=str(files("f5_tts").joinpath("../../data"))),
+            load_dataset(dataset_name, split="train", cache_dir=str(files("f5_tts").joinpath("../../data"))),
         )
 
     return train_dataset
