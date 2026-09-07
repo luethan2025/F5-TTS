@@ -10,6 +10,7 @@ import numpy as np
 import soundfile as sf
 import tomli
 from cached_path import cached_path
+from tqdm import tqdm
 from hydra.utils import get_class
 from omegaconf import OmegaConf
 from unidecode import unidecode
@@ -95,6 +96,11 @@ parser.add_argument(
     "--gen_file",
     type=str,
     help="The file with text to generate, will ignore --gen_text",
+)
+parser.add_argument(
+    "--use_single_speaker",
+    action="store_true",
+    help="Read --gen_file line by line and generate one sample per non-empty line using the main single speaker voice.",
 )
 parser.add_argument(
     "-o",
@@ -318,6 +324,44 @@ def main():
             voices[voice]["ref_audio"], voices[voice]["ref_text"]
         )
         print("ref_audio_", voices[voice]["ref_audio"], "\n\n")
+
+    if gen_file and args.use_single_speaker:
+        voice = "main"
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        lines = []
+        with codecs.open(gen_file, "r", "utf-8") as f:
+            lines = [line.strip() for line in f if line.strip()]
+        if not lines:
+            raise ValueError(f"No non-empty lines found in generation file: {gen_file}")
+
+        for idx, gen_text_ in tqdm(enumerate(lines, start=1), total=len(lines), desc="Generating samples"):
+            audio_segment, final_sample_rate, spectrogram = infer_process(
+                voices[voice]["ref_audio"],
+                voices[voice]["ref_text"],
+                gen_text_,
+                ema_model,
+                vocoder,
+                mel_spec_type=vocoder_name,
+                target_rms=target_rms,
+                cross_fade_duration=cross_fade_duration,
+                nfe_step=nfe_step,
+                cfg_strength=cfg_strength,
+                sway_sampling_coef=sway_sampling_coef,
+                speed=speed,
+                fix_duration=fix_duration,
+                device=device,
+            )
+            output_path = Path(output_file) if output_file else Path(
+                f"infer_cli_{datetime.now().strftime(r'%Y%m%d_%H%M%S')}.wav"
+            )
+            stem = output_path.stem or output_path.name
+            suffix = output_path.suffix or ".wav"
+            out_path = Path(output_dir) / f"{stem}_{idx:03d}{suffix}"
+            sf.write(str(out_path), audio_segment, final_sample_rate)
+            if remove_silence:
+                remove_silence_for_generated_wav(str(out_path))
+        return
 
     generated_audio_segments = []
     reg1 = r"(?=\[\w+\])"
