@@ -312,6 +312,55 @@ ema_model = load_model(
 # inference process
 
 
+def crossfade_audio_segments(left, right, sample_rate, fade_duration):
+    if fade_duration <= 0:
+        return np.concatenate([left, right])
+
+    fade_samples = int(fade_duration * sample_rate)
+    if fade_samples <= 0 or fade_samples >= min(len(left), len(right)):
+        return np.concatenate([left, right])
+
+    left = np.asarray(left, dtype=np.float32)
+    right = np.asarray(right, dtype=np.float32)
+    if left.ndim == 1:
+        fade_out = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)
+        fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)
+        left_tail = left[-fade_samples:] * fade_out
+        right_head = right[:fade_samples] * fade_in
+        return np.concatenate([left[:-fade_samples], left_tail + right_head, right[fade_samples:]])
+
+    fade_out = np.linspace(1.0, 0.0, fade_samples, dtype=np.float32)[:, None]
+    fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)[:, None]
+    left_tail = left[-fade_samples:, :] * fade_out
+    right_head = right[:fade_samples, :] * fade_in
+    return np.concatenate([left[:-fade_samples, :], left_tail + right_head, right[fade_samples:, :]], axis=0)
+
+
+def join_audio_files(input_paths, output_path, fade_duration=cross_fade_duration):
+    if not input_paths:
+        return
+
+    audio_segments = []
+    sample_rate = None
+    for input_path in input_paths:
+        segment, sr = sf.read(str(input_path), dtype="float32", always_2d=False)
+        if sample_rate is None:
+            sample_rate = sr
+        elif sr != sample_rate:
+            raise ValueError(f"Sample rate mismatch while joining {input_path}: {sr} != {sample_rate}")
+        audio_segments.append(segment)
+
+    if not audio_segments:
+        return
+
+    final_wave = np.asarray(audio_segments[0], dtype=np.float32)
+    for segment in audio_segments[1:]:
+        final_wave = crossfade_audio_segments(final_wave, np.asarray(segment, dtype=np.float32), sample_rate, fade_duration)
+
+    sf.write(str(output_path), final_wave, sample_rate)
+    print(f"Joined audio written to {output_path}")
+
+
 def main():
     main_voice = {"ref_audio": ref_audio, "ref_text": ref_text}
     if "voices" not in config:
@@ -337,6 +386,7 @@ def main():
         if not lines:
             raise ValueError(f"No non-empty lines found in generation file: {gen_file}")
 
+        generated_paths = []
         for idx, gen_text_ in tqdm(enumerate(lines, start=1), total=len(lines), desc="Generating samples"):
             audio_segment, final_sample_rate, spectrogram = infer_process(
                 voices[voice]["ref_audio"],
@@ -363,6 +413,11 @@ def main():
             sf.write(str(out_path), audio_segment, final_sample_rate)
             if remove_silence:
                 remove_silence_for_generated_wav(str(out_path))
+            generated_paths.append(out_path)
+
+        if generated_paths:
+            final_output_path = Path(output_dir) / (output_file or f"{stem}.wav")
+            join_audio_files(generated_paths, final_output_path, cross_fade_duration)
         return
 
     generated_audio_segments = []
@@ -417,7 +472,9 @@ def main():
             )
 
     if generated_audio_segments:
-        final_wave = np.concatenate(generated_audio_segments)
+        final_wave = generated_audio_segments[0]
+        for segment in generated_audio_segments[1:]:
+            final_wave = crossfade_audio_segments(final_wave, segment, final_sample_rate, cross_fade_duration)
 
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
