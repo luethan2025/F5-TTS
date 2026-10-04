@@ -325,26 +325,20 @@ def crossfade_audio_segments(left, right, sample_rate, fade_duration):
     return np.concatenate([left[:-fade_samples, :], left_tail + right_head, right[fade_samples:, :]], axis=0)
 
 
-def join_audio_files(input_paths, output_path, fade_duration=cross_fade_duration):
-    if not input_paths:
-        return
-
-    audio_segments = []
-    sample_rate = None
-    for input_path in input_paths:
-        segment, sr = sf.read(str(input_path), dtype="float32", always_2d=False)
-        if sample_rate is None:
-            sample_rate = sr
-        elif sr != sample_rate:
-            raise ValueError(f"Sample rate mismatch while joining {input_path}: {sr} != {sample_rate}")
-        audio_segments.append(segment)
-
+def join_audio_segments(audio_segments, output_path, fade_duration=cross_fade_duration):
     if not audio_segments:
         return
 
-    final_wave = np.asarray(audio_segments[0], dtype=np.float32)
-    for segment in audio_segments[1:]:
-        final_wave = crossfade_audio_segments(final_wave, np.asarray(segment, dtype=np.float32), sample_rate, fade_duration)
+    final_wave, sample_rate = audio_segments[0]
+    final_wave = np.asarray(final_wave, dtype=np.float32)
+    for segment, segment_sample_rate in audio_segments[1:]:
+        if segment_sample_rate != sample_rate:
+            raise ValueError(
+                f"Sample rate mismatch while joining audio segments: {segment_sample_rate} != {sample_rate}"
+            )
+        final_wave = crossfade_audio_segments(
+            final_wave, np.asarray(segment, dtype=np.float32), sample_rate, fade_duration
+        )
 
     sf.write(str(output_path), final_wave, sample_rate)
     print(f"Joined audio written to {output_path}")
@@ -375,8 +369,8 @@ def main():
         if not lines:
             raise ValueError(f"No non-empty lines found in generation file: {gen_file}")
 
-        generated_paths = []
-        for idx, gen_text_ in tqdm(enumerate(lines, start=1), total=len(lines), desc="Generating samples"):
+        audio_segments = []
+        for gen_text_ in tqdm(lines, total=len(lines), desc="Generating samples"):
             audio_segment, final_sample_rate, spectrogram = infer_process(
                 voices[voice]["ref_audio"],
                 voices[voice]["ref_text"],
@@ -393,20 +387,13 @@ def main():
                 fix_duration=fix_duration,
                 device=device,
             )
-            output_path = Path(output_file) if output_file else Path(
-                f"infer_cli_{datetime.now().strftime(r'%Y%m%d_%H%M%S')}.wav"
-            )
-            stem = output_path.stem or output_path.name
-            suffix = output_path.suffix or ".wav"
-            out_path = Path(output_dir) / f"{stem}_{idx:03d}{suffix}"
-            sf.write(str(out_path), audio_segment, final_sample_rate)
-            if remove_silence:
-                remove_silence_for_generated_wav(str(out_path))
-            generated_paths.append(out_path)
+            audio_segments.append((audio_segment, final_sample_rate))
 
-        if generated_paths:
-            final_output_path = Path(output_dir) / (output_file or f"{stem}.wav")
-            join_audio_files(generated_paths, final_output_path, cross_fade_duration)
+        if audio_segments:
+            final_output_path = Path(output_dir) / output_file
+            join_audio_segments(audio_segments, final_output_path, cross_fade_duration)
+            if remove_silence:
+                remove_silence_for_generated_wav(str(final_output_path))
         return
 
 
