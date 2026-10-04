@@ -346,11 +346,7 @@ def join_audio_segments(audio_segments, output_path, fade_duration=cross_fade_du
 
 def main():
     main_voice = {"ref_audio": ref_audio, "ref_text": ref_text}
-    if "voices" not in config:
-        voices = {"main": main_voice}
-    else:
-        voices = config["voices"]
-        voices["main"] = main_voice
+    voices = {"main": main_voice}
     for voice in voices:
         print("Voice:", voice)
         print("ref_audio ", voices[voice]["ref_audio"])
