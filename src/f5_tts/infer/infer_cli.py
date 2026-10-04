@@ -203,7 +203,7 @@ ref_text = (
 gen_text = args.gen_text or config.get("gen_text", "Here we generate something just for test.")
 gen_file = args.gen_file or config.get("gen_file", "")
 
-dataset_name, ckpt_name = args.ckpt_file.split("/")[1:]
+dataset_name, ckpt_name = args.ckpt_file.removeprefix("F5-TTS/").split("/")[1:]
 ckpt_name = ckpt_name.strip(".pt")
 output_dir = args.output_dir or os.path.join("tests", dataset_name, ckpt_name)
 output_file = args.output_file or config.get(
