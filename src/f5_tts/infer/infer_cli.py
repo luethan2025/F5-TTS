@@ -86,21 +86,10 @@ parser.add_argument(
     help="The transcript/subtitle for the reference audio",
 )
 parser.add_argument(
-    "-t",
-    "--gen_text",
-    type=str,
-    help="The text to make model synthesize a speech",
-)
-parser.add_argument(
     "-f",
     "--gen_file",
     type=str,
-    help="The file with text to generate, will ignore --gen_text",
-)
-parser.add_argument(
-    "--use_single_speaker",
-    action="store_true",
-    help="Read --gen_file line by line and generate one sample per non-empty line using the main single speaker voice.",
+    help="The file with text to generate",
 )
 parser.add_argument(
     "-o",
@@ -200,15 +189,17 @@ ref_text = (
     if args.ref_text is not None
     else config.get("ref_text", "Some call me nature, others call me mother nature.")
 )
-gen_text = args.gen_text or config.get("gen_text", "Here we generate something just for test.")
 gen_file = args.gen_file or config.get("gen_file", "")
 
 dataset_name, ckpt_name = args.ckpt_file.removeprefix("F5-TTS/").split("/")[1:]
 ckpt_name = ckpt_name.removesuffix(".pt")
 output_dir = args.output_dir or os.path.join("tests", dataset_name, ckpt_name)
-output_file = args.output_file or config.get(
-    "output_file", f"infer_cli_{datetime.now().strftime(r'%Y%m%d_%H%M%S')}.wav"
-)
+if args.output_file:
+    output_file = args.output_file
+elif gen_file:
+    output_file = f"{Path(gen_file).stem}.wav"
+else:
+    output_file = config.get("output_file", f"infer_cli_{datetime.now().strftime(r'%Y%m%d_%H%M%S')}.wav")
 
 save_chunk = args.save_chunk or config.get("save_chunk", False)
 use_legacy_text = args.no_legacy_text or config.get("no_legacy_text", False)  # no_legacy_text is a store_false arg
@@ -243,10 +234,8 @@ if "voices" in config:
             config["voices"][voice]["ref_audio"] = str(files("f5_tts").joinpath(f"{voice_ref_audio}"))
 
 
-# ignore gen_text if gen_file provided
 
-if gen_file:
-    gen_text = codecs.open(gen_file, "r", "utf-8").read()
+gen_text = codecs.open(gen_file, "r", "utf-8").read()
 
 
 # output path
@@ -376,7 +365,7 @@ def main():
         )
         print("ref_audio_", voices[voice]["ref_audio"], "\n\n")
 
-    if gen_file and args.use_single_speaker:
+    if gen_file:
         voice = "main"
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
@@ -419,72 +408,6 @@ def main():
             final_output_path = Path(output_dir) / (output_file or f"{stem}.wav")
             join_audio_files(generated_paths, final_output_path, cross_fade_duration)
         return
-
-    generated_audio_segments = []
-    reg1 = r"(?=\[\w+\])"
-    chunks = re.split(reg1, gen_text)
-    reg2 = r"\[(\w+)\]"
-    for text in chunks:
-        if not text.strip():
-            continue
-        match = re.match(reg2, text)
-        if match:
-            voice = match[1]
-        else:
-            print("No voice tag found, using main.")
-            voice = "main"
-        if voice not in voices:
-            print(f"Voice {voice} not found, using main.")
-            voice = "main"
-        text = re.sub(reg2, "", text)
-        ref_audio_ = voices[voice]["ref_audio"]
-        ref_text_ = voices[voice]["ref_text"]
-        local_speed = voices[voice].get("speed", speed)
-        gen_text_ = text.strip()
-        print(f"Voice: {voice}")
-        audio_segment, final_sample_rate, spectrogram = infer_process(
-            ref_audio_,
-            ref_text_,
-            gen_text_,
-            ema_model,
-            vocoder,
-            mel_spec_type=vocoder_name,
-            target_rms=target_rms,
-            cross_fade_duration=cross_fade_duration,
-            nfe_step=nfe_step,
-            cfg_strength=cfg_strength,
-            sway_sampling_coef=sway_sampling_coef,
-            speed=local_speed,
-            fix_duration=fix_duration,
-            device=device,
-        )
-        generated_audio_segments.append(audio_segment)
-
-        if save_chunk:
-            if len(gen_text_) > 200:
-                gen_text_ = gen_text_[:200] + " ... "
-            if use_legacy_text:
-                gen_text_ = unidecode(gen_text_)
-            sf.write(
-                os.path.join(output_chunk_dir, f"{len(generated_audio_segments) - 1}_{gen_text_}.wav"),
-                audio_segment,
-                final_sample_rate,
-            )
-
-    if generated_audio_segments:
-        final_wave = generated_audio_segments[0]
-        for segment in generated_audio_segments[1:]:
-            final_wave = crossfade_audio_segments(final_wave, segment, final_sample_rate, cross_fade_duration)
-
-        if not os.path.exists(output_dir):
-            os.makedirs(output_dir)
-
-        with open(wave_path, "wb") as f:
-            sf.write(f.name, final_wave, final_sample_rate)
-            # Remove silence
-            if remove_silence:
-                remove_silence_for_generated_wav(f.name)
-            print(f.name)
 
 
 if __name__ == "__main__":
